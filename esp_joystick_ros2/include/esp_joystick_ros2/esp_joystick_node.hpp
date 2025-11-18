@@ -33,6 +33,7 @@ private:
   double publish_rate_;
   int max_button_count_;
   int max_axis_count_;
+  bool crc_validation_enabled_;
 
   // Thread control
   std::atomic<bool> running_;

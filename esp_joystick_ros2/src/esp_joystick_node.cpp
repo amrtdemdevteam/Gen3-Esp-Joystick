@@ -34,6 +34,7 @@ void EspJoystickNode::declare_parameters() {
   this->declare_parameter("publish_rate", 100.0); // Hz
   this->declare_parameter("max_button_count", 16);
   this->declare_parameter("max_axis_count", 8);
+  this->declare_parameter("crc_validation_enabled", true);
 }
 
 void EspJoystickNode::get_parameters() {
@@ -42,15 +43,22 @@ void EspJoystickNode::get_parameters() {
   publish_rate_ = this->get_parameter("publish_rate").as_double();
   max_button_count_ = this->get_parameter("max_button_count").as_int();
   max_axis_count_ = this->get_parameter("max_axis_count").as_int();
+  crc_validation_enabled_ =
+      this->get_parameter("crc_validation_enabled").as_bool();
 
   RCLCPP_INFO(this->get_logger(), "Parameters:");
   RCLCPP_INFO(this->get_logger(), "  Serial Port: %s", serial_port_.c_str());
   RCLCPP_INFO(this->get_logger(), "  Baud Rate: %d", baud_rate_);
   RCLCPP_INFO(this->get_logger(), "  Publish Rate: %.1f Hz", publish_rate_);
+  RCLCPP_INFO(this->get_logger(), "  CRC Validation: %s",
+              crc_validation_enabled_ ? "ENABLED" : "DISABLED");
 }
 
 void EspJoystickNode::initialize_serial() {
   serial_reader_ = std::make_unique<SerialReader>();
+
+  // Set CRC validation setting
+  serial_reader_->setCrcValidationEnabled(crc_validation_enabled_);
 
   if (!serial_reader_->connect(serial_port_, baud_rate_)) {
     RCLCPP_ERROR(this->get_logger(), "Failed to connect to serial port %s: %s",
@@ -92,6 +100,11 @@ void EspJoystickNode::serial_read_worker() {
         // Update latest data thread-safe
         std::lock_guard<std::mutex> lock(joy_data_mutex_);
         latest_joy_data_ = temp_data;
+      } else {
+        // Print error message when packet reading fails
+        RCLCPP_ERROR(this->get_logger(),
+                     "Failed to read packet from serial: %s",
+                     serial_reader_->getErrorMessage().c_str());
       }
     } else {
       // Try to reconnect

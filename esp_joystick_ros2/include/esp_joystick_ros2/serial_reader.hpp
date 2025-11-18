@@ -38,6 +38,10 @@ public:
 
   std::string getErrorMessage() const;
 
+  // Enable/disable CRC validation (for debugging)
+  void setCrcValidationEnabled(bool enabled);
+  bool isCrcValidationEnabled() const;
+
 private:
   static constexpr uint8_t START_BYTE = 0xAA;
   static constexpr uint8_t EXPECTED_LENGTH = 12;
@@ -46,7 +50,8 @@ private:
   std::unique_ptr<serial::Serial> serial_;
   JoyData latest_data_;
   mutable std::mutex data_mutex_;
-  std::string error_message_;
+  mutable std::string error_message_;
+  bool crc_validation_enabled_;
 
   uint8_t computeCRC(const uint8_t *data, size_t len) const;
   bool waitForStartByte();

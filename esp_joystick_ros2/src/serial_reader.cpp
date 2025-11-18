@@ -5,7 +5,8 @@
 
 namespace esp_joystick_ros2 {
 
-SerialReader::SerialReader() : serial_(nullptr) {}
+SerialReader::SerialReader()
+    : serial_(nullptr), crc_validation_enabled_(true) {}
 
 SerialReader::~SerialReader() { disconnect(); }
 
@@ -46,13 +47,14 @@ bool SerialReader::readPacket(JoyData &data) {
   }
 
   try {
+    uint8_t packet[PACKET_SIZE];
     // Wait for start byte
     if (!waitForStartByte()) {
       return false; // No valid packet start found
     }
 
-    // Read complete packet
-    uint8_t packet[PACKET_SIZE];
+    packet[0] = START_BYTE;
+
     if (!readPacketBytes(packet, PACKET_SIZE)) {
       error_message_ = "Failed to read complete packet";
       return false;
@@ -60,7 +62,6 @@ bool SerialReader::readPacket(JoyData &data) {
 
     // Validate packet
     if (!validatePacket(packet)) {
-      error_message_ = "CRC validation failed - packet dropped";
       return false;
     }
 
@@ -91,9 +92,11 @@ std::string SerialReader::getErrorMessage() const { return error_message_; }
 
 uint8_t SerialReader::computeCRC(const uint8_t *data, size_t len) const {
   uint8_t crc = 0;
+
   for (size_t i = 0; i < len; ++i) {
     crc ^= data[i];
   }
+
   return crc;
 }
 
@@ -112,6 +115,7 @@ bool SerialReader::waitForStartByte() {
       }
     }
   } catch (const std::exception &e) {
+    serial_->flush();
     error_message_ = "Error waiting for start byte: " + std::string(e.what());
     return false;
   }
@@ -119,12 +123,13 @@ bool SerialReader::waitForStartByte() {
 
 bool SerialReader::readPacketBytes(uint8_t *buffer, size_t size) {
   try {
-    size_t total_read = 0;
+    size_t total_read = 1;
     while (total_read < size) {
       size_t bytes_read = serial_->read(buffer + total_read, size - total_read);
       if (bytes_read == 0) {
         return false; // Timeout
       }
+
       total_read += bytes_read;
     }
     return true;
@@ -135,22 +140,30 @@ bool SerialReader::readPacketBytes(uint8_t *buffer, size_t size) {
 }
 
 bool SerialReader::validatePacket(const uint8_t *packet) const {
-  // Check header
-  if (packet[0] != START_BYTE) {
-    return false;
-  }
 
   // Check length
   if (packet[1] != EXPECTED_LENGTH) {
+    error_message_ =
+        "Invalid packet length, Received: " + std::to_string(packet[1]) +
+        " but Expected: " + std::to_string(EXPECTED_LENGTH);
     return false;
   }
 
-  // Validate CRC
-  uint8_t crc_calc =
-      computeCRC(packet, PACKET_SIZE - 1); // All bytes except CRC
-  uint8_t crc_recv = packet[PACKET_SIZE - 1];
+  // Validate CRC (only if enabled)
+  if (crc_validation_enabled_) {
+    uint8_t crc_calc =
+        computeCRC(packet, PACKET_SIZE - 1); // All bytes except CRC
+    uint8_t crc_recv = packet[PACKET_SIZE - 1];
 
-  return crc_calc == crc_recv;
+    if (crc_calc != crc_recv) {
+      error_message_ = "CRC MISMATCH! Packet dropped.\n";
+      return false;
+    }
+  } else {
+    error_message_ = "CRC validation DISABLED - accepting packet\n";
+  }
+
+  return true;
 }
 
 void SerialReader::parsePayload(const uint8_t *payload, JoyData &data) const {
@@ -169,6 +182,14 @@ void SerialReader::parsePayload(const uint8_t *payload, JoyData &data) const {
   data.ly = static_cast<int16_t>(payload[6] | (payload[7] << 8));
   data.rx = static_cast<int16_t>(payload[8] | (payload[9] << 8));
   data.ry = static_cast<int16_t>(payload[10] | (payload[11] << 8));
+}
+
+void SerialReader::setCrcValidationEnabled(bool enabled) {
+  crc_validation_enabled_ = enabled;
+}
+
+bool SerialReader::isCrcValidationEnabled() const {
+  return crc_validation_enabled_;
 }
 
 } // namespace esp_joystick_ros2
