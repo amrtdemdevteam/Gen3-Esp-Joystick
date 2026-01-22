@@ -13,7 +13,7 @@ SerialReader::~SerialReader() { disconnect(); }
 bool SerialReader::connect(const std::string &port, int baud_rate) {
   try {
     serial_ = std::make_unique<serial::Serial>(
-        port, baud_rate, serial::Timeout::simpleTimeout(1000));
+        port, baud_rate, serial::Timeout::simpleTimeout(50));
 
     // Give some time for the connection to establish
     usleep(100000); // 100ms
