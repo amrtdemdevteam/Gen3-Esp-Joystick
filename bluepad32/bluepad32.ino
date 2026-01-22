@@ -14,6 +14,8 @@ struct __attribute__((packed)) JoyPacket {
 };
 
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+unsigned long lastDataTime[BP32_MAX_GAMEPADS] = {0};
+const unsigned long DATA_TIMEOUT_MS = 500;
 
 uint8_t computeCRC(uint8_t *data, uint8_t len) {
   uint8_t crc = 0;
@@ -23,10 +25,28 @@ uint8_t computeCRC(uint8_t *data, uint8_t len) {
   return crc;
 }
 
+void sendZeroPacket() {
+  JoyPacket pkt;
+  pkt.header = 0xAA;
+  pkt.length = 12;
+  pkt.buttons = 0;
+  pkt.misc = 0;
+  pkt.dpad = 0;
+  pkt.lx = 0;
+  pkt.ly = 0;
+  pkt.rx = 0;
+  pkt.ry = 0;
+
+  pkt.crc = computeCRC((uint8_t *)&pkt, sizeof(pkt) - 1);
+
+  Serial.write((uint8_t *)&pkt, sizeof(pkt));
+}
+
 void onConnectedController(ControllerPtr ctl) {
   for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
     if (myControllers[i] == nullptr) {
       myControllers[i] = ctl;
+      lastDataTime[i] = millis();
       Serial.printf("Controller connected at index=%d\n", i);
       return;
     }
@@ -37,13 +57,15 @@ void onDisconnectedController(ControllerPtr ctl) {
   for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
     if (myControllers[i] == ctl) {
       myControllers[i] = nullptr;
+      lastDataTime[i] = 0;
       Serial.printf("Controller disconnected from index=%d\n", i);
+      sendZeroPacket();
       return;
     }
   }
 }
 
-void processGamepad(ControllerPtr ctl) {
+void processGamepad(ControllerPtr ctl, int index) {
   JoyPacket pkt;
   pkt.header = 0xAA;
   pkt.length = 12;
@@ -59,13 +81,33 @@ void processGamepad(ControllerPtr ctl) {
   pkt.crc = computeCRC((uint8_t *)&pkt, sizeof(pkt) - 1);
 
   Serial.write((uint8_t *)&pkt, sizeof(pkt));
+  lastDataTime[index] = millis();
 }
 
 void processControllers() {
-  for (auto ctl : myControllers) {
+  bool anyControllerActive = false;
+
+  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+    auto ctl = myControllers[i];
     if (ctl && ctl->isConnected() && ctl->hasData()) {
       if (ctl->isGamepad()) {
-        processGamepad(ctl);
+        processGamepad(ctl, i);
+        anyControllerActive = true;
+      }
+    }
+  }
+
+  if (!anyControllerActive) {
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+      if (myControllers[i] != nullptr && lastDataTime[i] > 0) {
+        unsigned long timeSinceLastData = millis() - lastDataTime[i];
+        if (timeSinceLastData > DATA_TIMEOUT_MS) {
+          sendZeroPacket();
+          lastDataTime[i] = 0;
+          Serial.printf("Controller index=%d timeout, sending zero packet\n",
+                        i);
+          break;
+        }
       }
     }
   }
@@ -87,7 +129,21 @@ void loop() {
 
   if (dataUpdated) {
     processControllers();
+  } else {
+    unsigned long now = millis();
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+      if (myControllers[i] != nullptr && lastDataTime[i] > 0) {
+        unsigned long timeSinceLastData = now - lastDataTime[i];
+        if (timeSinceLastData > DATA_TIMEOUT_MS) {
+          sendZeroPacket();
+          lastDataTime[i] = 0;
+          Serial.printf("Controller index=%d timeout, sending zero packet\n",
+                        i);
+          break;
+        }
+      }
+    }
   }
 
-  delay(1);
+  delay(5);
 }
