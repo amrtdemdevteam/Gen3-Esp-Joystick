@@ -137,8 +137,6 @@ void loop() {
         if (timeSinceLastData > DATA_TIMEOUT_MS) {
           sendZeroPacket();
           lastDataTime[i] = 0;
-          Serial.printf("Controller index=%d timeout, sending zero packet\n",
-                        i);
           break;
         }
       }

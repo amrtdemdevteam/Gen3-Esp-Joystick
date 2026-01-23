@@ -77,25 +77,24 @@ void EspJoystickNode::setup_publishers() {
 }
 
 void EspJoystickNode::serial_read_worker() {
-  JoyData temp_data;
-
   while (running_ && rclcpp::ok()) {
     if (serial_reader_->isConnected()) {
+      // Create fresh data structure for each read to avoid stale data
+      JoyData temp_data;
 
-      // ฟังก์ชันนี้ควรเป็นแบบ Blocking หรือมี timeout สั้นๆ
+      // Read packet - this is blocking with timeout
       if (serial_reader_->readPacket(temp_data)) {
-
-        // --- CRITICAL SECTION: PUBLISH IMMEDIATELY ---
-        // ไม่รอ Timer แล้ว ได้ของปุ๊บ ส่งปั๊บ
+        // Convert and publish immediately
         auto joy_msg = convert_to_joy_message(temp_data);
 
-        // ใส่ Timestamp ล่าสุดเพื่อให้ ROS รู้ว่าข้อมูลสดแค่ไหน
+        // Add fresh timestamp
         joy_msg.header.stamp = this->now();
         joy_msg.header.frame_id = "joy_link";
 
         joy_publisher_->publish(joy_msg);
-        // ---------------------------------------------
       }
+      // If readPacket returns false, temp_data is discarded and we get a fresh
+      // one next iteration
 
     } else {
       RCLCPP_WARN(this->get_logger(), "Reconnecting...");
