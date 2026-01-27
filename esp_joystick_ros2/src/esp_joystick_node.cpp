@@ -12,8 +12,8 @@ EspJoystickNode::EspJoystickNode(const rclcpp::NodeOptions &options)
 
   declare_parameters();
   get_parameters();
-  initialize_serial();
   setup_publishers();
+  initialize_serial();
 
   RCLCPP_INFO(this->get_logger(), "ESP Joystick Node initialized successfully");
 }

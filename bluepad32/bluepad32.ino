@@ -119,7 +119,6 @@ void setup() {
   delay(200);
 
   BP32.setup(&onConnectedController, &onDisconnectedController);
-  BP32.forgetBluetoothKeys();
   BP32.enableVirtualDevice(false);
 }
 
@@ -143,5 +142,5 @@ void loop() {
     }
   }
 
-  delay(5);
+  delay(2);
 }
