@@ -17,6 +17,12 @@ ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 unsigned long lastDataTime[BP32_MAX_GAMEPADS] = {0};
 const unsigned long DATA_TIMEOUT_MS = 500;
 
+// Timestamp for last data update
+unsigned long lastDataTime = 0;
+
+// Timeout to reset joy value if joy loss (ms)
+uint16_t joyLossTimeout = 500;
+
 uint8_t computeCRC(uint8_t *data, uint8_t len) {
   uint8_t crc = 0;
   for (int i = 0; i < len; i++) {
@@ -110,6 +116,13 @@ void processControllers() {
         }
       }
     }
+  }
+
+  // If no controllers are active, reset joystick data
+  if (!anyControllerActive) {
+    portENTER_CRITICAL(&mux);
+    resetJoyData();
+    portEXIT_CRITICAL(&mux);
   }
 }
 
