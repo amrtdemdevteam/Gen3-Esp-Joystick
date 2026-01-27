@@ -17,12 +17,6 @@ ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 unsigned long lastDataTime[BP32_MAX_GAMEPADS] = {0};
 const unsigned long DATA_TIMEOUT_MS = 500;
 
-// Timestamp for last data update
-unsigned long lastDataTime = 0;
-
-// Timeout to reset joy value if joy loss (ms)
-uint16_t joyLossTimeout = 500;
-
 uint8_t computeCRC(uint8_t *data, uint8_t len) {
   uint8_t crc = 0;
   for (int i = 0; i < len; i++) {
@@ -53,7 +47,6 @@ void onConnectedController(ControllerPtr ctl) {
     if (myControllers[i] == nullptr) {
       myControllers[i] = ctl;
       lastDataTime[i] = millis();
-      Serial.printf("Controller connected at index=%d\n", i);
       return;
     }
   }
@@ -64,7 +57,6 @@ void onDisconnectedController(ControllerPtr ctl) {
     if (myControllers[i] == ctl) {
       myControllers[i] = nullptr;
       lastDataTime[i] = 0;
-      Serial.printf("Controller disconnected from index=%d\n", i);
       sendZeroPacket();
       return;
     }
@@ -110,19 +102,10 @@ void processControllers() {
         if (timeSinceLastData > DATA_TIMEOUT_MS) {
           sendZeroPacket();
           lastDataTime[i] = 0;
-          Serial.printf("Controller index=%d timeout, sending zero packet\n",
-                        i);
           break;
         }
       }
     }
-  }
-
-  // If no controllers are active, reset joystick data
-  if (!anyControllerActive) {
-    portENTER_CRITICAL(&mux);
-    resetJoyData();
-    portEXIT_CRITICAL(&mux);
   }
 }
 
@@ -155,5 +138,5 @@ void loop() {
     }
   }
 
-  delay(2);
+  delay(5);
 }
