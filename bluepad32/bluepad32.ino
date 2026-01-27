@@ -1,10 +1,8 @@
 #include <Bluepad32.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 struct __attribute__((packed)) JoyPacket {
   uint8_t header; // 0xAA
-  uint8_t length; // number of payload bytes (11)
+  uint8_t length; // number of payload bytes
   uint16_t buttons;
   uint8_t misc;
   uint8_t dpad;
@@ -15,16 +13,9 @@ struct __attribute__((packed)) JoyPacket {
   uint8_t crc;
 };
 
-JoyPacket joy;
-
-// Mutex for safe cross-core access
-portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-
-// Timestamp for last data update
-unsigned long lastDataTime = 0;
-
-// Timeout to reset joy value if joy loss (ms)
-uint16_t joyLossTimeout = 500;
+ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+unsigned long lastDataTime[BP32_MAX_GAMEPADS] = {0};
+const unsigned long DATA_TIMEOUT_MS = 500;
 
 uint8_t computeCRC(uint8_t *data, uint8_t len) {
   uint8_t crc = 0;
@@ -34,143 +25,118 @@ uint8_t computeCRC(uint8_t *data, uint8_t len) {
   return crc;
 }
 
-void resetJoyData() {
-  joy.header = 0xAA;
-  joy.length = 12;
-  joy.buttons = 0;
-  joy.misc = 0;
-  joy.dpad = 0;
-  joy.lx = 0;
-  joy.ly = 0;
-  joy.rx = 0;
-  joy.ry = 0;
-  joy.crc = 0;
-}
+void sendZeroPacket() {
+  JoyPacket pkt;
+  pkt.header = 0xAA;
+  pkt.length = 12;
+  pkt.buttons = 0;
+  pkt.misc = 0;
+  pkt.dpad = 0;
+  pkt.lx = 0;
+  pkt.ly = 0;
+  pkt.rx = 0;
+  pkt.ry = 0;
 
-ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+  pkt.crc = computeCRC((uint8_t *)&pkt, sizeof(pkt) - 1);
+
+  Serial.write((uint8_t *)&pkt, sizeof(pkt));
+}
 
 void onConnectedController(ControllerPtr ctl) {
   for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
     if (myControllers[i] == nullptr) {
       myControllers[i] = ctl;
-      Serial.printf("Controller connected at index=%d\n", i);
+      lastDataTime[i] = millis();
       return;
     }
   }
-  Serial.println("No empty slot for controller!");
 }
 
 void onDisconnectedController(ControllerPtr ctl) {
   for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
     if (myControllers[i] == ctl) {
       myControllers[i] = nullptr;
-      Serial.printf("Controller disconnected from index=%d\n", i);
+      lastDataTime[i] = 0;
+      sendZeroPacket();
       return;
     }
   }
 }
 
-void processGamepad(ControllerPtr ctl) {
-  portENTER_CRITICAL(&mux);
+void processGamepad(ControllerPtr ctl, int index) {
+  JoyPacket pkt;
+  pkt.header = 0xAA;
+  pkt.length = 12;
 
-  joy.header = 0xAA; // start byte
-  joy.length = 12;   // payload size
+  pkt.buttons = ctl->buttons();
+  pkt.misc = ctl->miscButtons();
+  pkt.dpad = ctl->dpad();
+  pkt.lx = ctl->axisX();
+  pkt.ly = ctl->axisY();
+  pkt.rx = ctl->axisRX();
+  pkt.ry = ctl->axisRY();
 
-  joy.buttons = ctl->buttons();
-  joy.misc = ctl->miscButtons();
-  joy.dpad = ctl->dpad();
+  pkt.crc = computeCRC((uint8_t *)&pkt, sizeof(pkt) - 1);
 
-  joy.lx = ctl->axisX();
-  joy.ly = ctl->axisY();
-  joy.rx = ctl->axisRX();
-  joy.ry = ctl->axisRY();
-
-  // Update timestamp when new data is received
-  lastDataTime = millis();
-
-  portEXIT_CRITICAL(&mux);
+  Serial.write((uint8_t *)&pkt, sizeof(pkt));
+  lastDataTime[index] = millis();
 }
 
 void processControllers() {
   bool anyControllerActive = false;
 
-  for (auto ctl : myControllers) {
+  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+    auto ctl = myControllers[i];
     if (ctl && ctl->isConnected() && ctl->hasData()) {
       if (ctl->isGamepad()) {
-        processGamepad(ctl);
+        processGamepad(ctl, i);
         anyControllerActive = true;
       }
     }
   }
 
-  // If no controllers are active, reset joystick data
   if (!anyControllerActive) {
-    portENTER_CRITICAL(&mux);
-    resetJoyData();
-    portEXIT_CRITICAL(&mux);
-  }
-}
-
-void joystickTask(void *p) {
-  for (;;) {
-    if (BP32.update()) {
-      processControllers();
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+      if (myControllers[i] != nullptr && lastDataTime[i] > 0) {
+        unsigned long timeSinceLastData = millis() - lastDataTime[i];
+        if (timeSinceLastData > DATA_TIMEOUT_MS) {
+          sendZeroPacket();
+          lastDataTime[i] = 0;
+          break;
+        }
+      }
     }
-    vTaskDelay(1); // non-blocking
-  }
-}
-
-void serialSenderTask(void *p) {
-  for (;;) {
-
-    JoyPacket pkt;
-    unsigned long now = 0;
-    now = millis();
-
-    // Check for timeout (1 second = 1000ms)
-    if (now - lastDataTime > joyLossTimeout) {
-      // Reset joystick data to initial values
-      portENTER_CRITICAL(&mux);
-      resetJoyData();
-      lastDataTime = now; // Update to prevent continuous resets
-      pkt = joy;
-      portEXIT_CRITICAL(&mux);
-    } else {
-      // Safely copy shared struct
-      portENTER_CRITICAL(&mux);
-      pkt = joy;
-      portEXIT_CRITICAL(&mux);
-    }
-
-    // Calculate CRC for all bytes except CRC itself
-    pkt.crc = computeCRC((uint8_t *)&pkt, sizeof(pkt) - 1);
-
-    // Send complete packet
-    Serial.write((uint8_t *)&pkt, sizeof(pkt));
-
-    vTaskDelay(20); // 50Hz
   }
 }
 
 void setup() {
   Serial.begin(115200);
+
   delay(200);
 
-  // Initialize joystick data to zero
-  resetJoyData();
-  lastDataTime = millis();
-
-  Serial.printf("Bluepad32 Firmware: %s\n", BP32.firmwareVersion());
-
   BP32.setup(&onConnectedController, &onDisconnectedController);
-  BP32.forgetBluetoothKeys();
   BP32.enableVirtualDevice(false);
-
-  // Create tasks pinned to different cores
-  xTaskCreatePinnedToCore(joystickTask, "joyReader", 4096, NULL, 2, NULL,
-                          0); // Core 0
-  xTaskCreatePinnedToCore(serialSenderTask, "serialSender", 4096, NULL, 1, NULL,
-                          1); // Core 1
 }
 
-void loop() { vTaskDelay(1000); }
+void loop() {
+
+  bool dataUpdated = BP32.update();
+
+  if (dataUpdated) {
+    processControllers();
+  } else {
+    unsigned long now = millis();
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+      if (myControllers[i] != nullptr && lastDataTime[i] > 0) {
+        unsigned long timeSinceLastData = now - lastDataTime[i];
+        if (timeSinceLastData > DATA_TIMEOUT_MS) {
+          sendZeroPacket();
+          lastDataTime[i] = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  delay(5);
+}
