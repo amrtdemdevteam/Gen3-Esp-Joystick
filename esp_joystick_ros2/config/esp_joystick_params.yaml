@@ -3,16 +3,5 @@ esp_joystick_node:
     # Serial communication settings
     serial_port: "/dev/ttyUSB0" # Change to match your system (e.g., /dev/ttyACM0, /dev/ttyUSB1)
     baud_rate: 115200
-
-    # Publishing settings
-    publish_rate: 20.0 # Hz - frequency of joy message publishing
-    max_button_count: 16 # Number of buttons in joy message
-    max_axis_count: 8 # Number of axes in joy message
-
-    # Performance settings
-    read_timeout_ms: 1000 # Serial read timeout in milliseconds
-    reconnect_interval_s: 2 # Reconnection attempt interval in seconds
-
-    # Debug settings
-    debug_packets: false # Enable packet debugging output
-    debug_buttons: false # Enable button state debugging
+    crc_validation_enabled: true
+    reconnect_interval_ms: 2000 # ms
