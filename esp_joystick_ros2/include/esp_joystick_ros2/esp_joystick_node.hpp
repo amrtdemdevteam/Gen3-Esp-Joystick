@@ -3,9 +3,7 @@
 
 #include <atomic>
 #include <esp_joystick_interfaces/msg/joystick_info.hpp>
-#include <memory>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/joy.hpp>
 #include <string>
 #include <thread>
 
@@ -23,7 +21,6 @@ private:
   // ROS2 components
   rclcpp::Publisher<esp_joystick_interfaces::msg::JoystickInfo>::SharedPtr
       joy_publisher_;
-  rclcpp::TimerBase::SharedPtr read_timer_;
 
   // Serial communication
   std::unique_ptr<SerialReader> serial_reader_;
@@ -31,6 +28,7 @@ private:
   // Node parameters
   std::string serial_port_;
   int baud_rate_;
+  uint32_t reconnect_interval_ms_;
   bool crc_validation_enabled_;
 
   // Thread control

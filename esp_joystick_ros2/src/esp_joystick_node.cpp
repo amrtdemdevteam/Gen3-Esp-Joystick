@@ -1,8 +1,6 @@
 #include "esp_joystick_ros2/esp_joystick_node.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
-#include <chrono>
-#include <memory>
 
 namespace esp_joystick_ros2 {
 
@@ -30,17 +28,20 @@ void EspJoystickNode::declare_parameters() {
   this->declare_parameter("serial_port", "/dev/ttyUSB0");
   this->declare_parameter("baud_rate", 115200);
   this->declare_parameter("crc_validation_enabled", true);
+  this->declare_parameter("reconnect_interval_ms", 1000);
 }
 
 void EspJoystickNode::get_parameters() {
   serial_port_ = this->get_parameter("serial_port").as_string();
   baud_rate_ = this->get_parameter("baud_rate").as_int();
+  reconnect_interval_ms_ = this->get_parameter("reconnect_interval_ms").as_int();
   crc_validation_enabled_ =
       this->get_parameter("crc_validation_enabled").as_bool();
 
   RCLCPP_INFO(this->get_logger(), "Parameters:");
   RCLCPP_INFO(this->get_logger(), "  Serial Port: %s", serial_port_.c_str());
   RCLCPP_INFO(this->get_logger(), "  Baud Rate: %d", baud_rate_);
+  RCLCPP_INFO(this->get_logger(), "  Reconnect interval: %d", reconnect_interval_ms_);
   RCLCPP_INFO(this->get_logger(), "  CRC Validation: %s",
               crc_validation_enabled_ ? "ENABLED" : "DISABLED");
 }
@@ -66,14 +67,9 @@ void EspJoystickNode::initialize_serial() {
 }
 
 void EspJoystickNode::setup_publishers() {
-  // Using Sensor QOS
-  rclcpp::QoS qos(rclcpp::KeepLast(10));
-  qos.best_effort();
-  qos.durability_volatile();
-
   joy_publisher_ =
       this->create_publisher<esp_joystick_interfaces::msg::JoystickInfo>("joy",
-                                                                         10);
+                                                                         rclcpp::SensorDataQoS());
 }
 
 void EspJoystickNode::serial_read_worker() {
@@ -93,20 +89,12 @@ void EspJoystickNode::serial_read_worker() {
 
         joy_publisher_->publish(joy_msg);
       }
-      // If readPacket returns false, temp_data is discarded and we get a fresh
-      // one next iteration
 
     } else {
       RCLCPP_WARN(this->get_logger(), "Reconnecting...");
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_interval_ms_));
       serial_reader_->connect(serial_port_, baud_rate_);
     }
-  }
-}
-
-void EspJoystickNode::read_timer_callback() {
-  if (!serial_reader_->isConnected()) {
-    RCLCPP_WARN(this->get_logger(), "Serial connection status: disconnected");
   }
 }
 
@@ -134,8 +122,8 @@ EspJoystickNode::convert_to_joy_message(const JoyData &data) const {
   joy_msg.left = (data.dpad >> 3) & 0x1;
 
   // Misc buttons from misc byte
-  joy_msg.select = (data.misc >> 1) & 0x1; // Select bit 0
-  joy_msg.start = (data.misc >> 2) & 0x1;  // Start bit 1
+  joy_msg.select = (data.misc >> 1) & 0x1;
+  joy_msg.start = (data.misc >> 2) & 0x1;
 
   // Normalize analog stick values
   joy_msg.lx = static_cast<int16_t>(data.lx);
